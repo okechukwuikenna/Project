@@ -1,52 +1,45 @@
-
 import streamlit as st
 import pandas as pd
-import joblib
-import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+
+@st.cache_data
+def load_data():
+    df = pd.read_csv("cleaned_Agri_data.csv")
+    df = df.dropna(subset=["lc1a", "e13a_1"])
+    df = df[(df["e7"] >= 18) & (df["e7"] <= 25)]
+    df["loan_eligible"] = df["lc1a"].apply(lambda x: 1 if x in [2, 3, 4] else 0)
+    features = ["e7", "e8", "ie1b", "lc1_1", "lc1_2", "gen3_1", "e13a_1", "e14_17", "e14_15", "e14_3"]
+    df = df[features + ["loan_eligible"]]
+    return df
 
 @st.cache_resource
-def load_model():
-    return joblib.load("loan_model.pkl")
-
-def preprocess_input(data):
-    # Placeholder: Modify based on actual preprocessing
-    return data
-
-def plot_feature_importance(model, feature_names):
-    importance = model.feature_importances_
-    sorted_idx = importance.argsort()[::-1][:10]
-    plt.figure(figsize=(10, 5))
-    sns.barplot(x=importance[sorted_idx], y=[feature_names[i] for i in sorted_idx])
-    plt.title("Top 10 Important Features")
-    st.pyplot(plt.gcf())
+def train_model(df):
+    X = df.drop("loan_eligible", axis=1)
+    y = df["loan_eligible"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    return model, X.columns
 
 def main():
     st.title("AgriTrust Loan Eligibility Predictor")
 
-    age = st.slider("Age", 18, 60)
-    gender = st.radio("Gender", ["Male", "Female"])
-    income = st.selectbox("Avg Income Category", ["Below N15,000 per month", "N15,001 - N35,000 per month", 
-                                                  "N35001 - N55,000 per month", "N55,001 - N75,000 per month"])
-    education = st.selectbox("Education Level", ["No education", "Primary complete", "Secondary complete", 
-                                                  "University/Polytechnic OND", "University/Polytechnic HND"])
+    df = load_data()
+    model, feature_names = train_model(df)
 
-    input_data = pd.DataFrame([{
-        "Age": age,
-        "Gender": gender,
-        "Avg_income": income,
-        "Edu_level": education
-    }])
+    st.sidebar.header("Input Features")
+    user_input = {feature: st.sidebar.number_input(feature, float(df[feature].min()), float(df[feature].max()), float(df[feature].mean())) for feature in feature_names}
 
-    model = load_model()
+    input_df = pd.DataFrame([user_input])
+    prediction = model.predict(input_df)[0]
+    probability = model.predict_proba(input_df)[0][prediction]
 
-    if st.button("Check Eligibility"):
-        processed = preprocess_input(input_data)
-        prediction = model.predict(processed)[0]
-        st.success("Loan eligibility result: {}".format("Eligible" if prediction == 1 else "Not Eligible"))
-
-        if st.checkbox("Show Feature Importance"):
-            plot_feature_importance(model, processed.columns)
+    st.subheader("Prediction Result")
+    st.write("Eligible for loan ✅" if prediction == 1 else "Not eligible for loan ❌")
+    st.write(f"Confidence: {probability:.2%}")
 
 if __name__ == "__main__":
     main()
